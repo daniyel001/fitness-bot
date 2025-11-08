@@ -351,8 +351,9 @@ async def get_id_cmd(msg: types.Message):
 # --- Запуск бота ---
 async def main():
     logger.info("🚀 Запуск бота...")
+    
+    # Сбрасываем webhook на всякий случай
+    await bot.delete_webhook(drop_pending_updates=True)
+    
     await init_db()
     await dp.start_polling(bot, skip_updates=True)
-
-if __name__ == "__main__":
-    asyncio.run(main())
