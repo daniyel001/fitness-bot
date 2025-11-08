@@ -1,9 +1,7 @@
-import io
-import qrcode
 import aiosqlite
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
-from aiogram.types import BufferedInputFile, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 import asyncio
@@ -31,7 +29,7 @@ class AddClientStates(StatesGroup):
 def get_client_kb():
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="🎟 Мой QR"), KeyboardButton(text="📊 Мои посещения")],
+            [KeyboardButton(text="📊 Мои посещения")],
             [KeyboardButton(text="🆔 Мой ID"), KeyboardButton(text="ℹ️ Помощь")]
         ],
         resize_keyboard=True
@@ -133,39 +131,19 @@ async def start_cmd(msg: types.Message):
             await msg.answer("🔐 Админ-панель активирована", reply_markup=get_admin_kb())
             return
         
-        qr_data = str(user_id)
-        qr_img = qrcode.make(qr_data)
-        buf = io.BytesIO()
-        qr_img.save(buf, format="PNG")
-        buf.seek(0)
-        photo = BufferedInputFile(buf.read(), filename="qr.png")
+        welcome_msg = f"""🎉 Добро пожаловать, {name}!
+
+📋 Ваш абонемент создан!
+🎟 Количество посещений: 12
+📅 Абонемент до: {(datetime.now() + timedelta(days=30)).strftime('%d.%m.%Y')}
+
+Используйте кнопки ниже для управления:"""
         
-        await msg.answer_photo(
-            photo=photo, 
-            caption=f"🎟 Ваш абонемент, {name}\n📅 До {(datetime.now() + timedelta(days=30)).strftime('%d.%m.%Y')}",
-            reply_markup=get_client_kb()
-        )
+        await msg.answer(welcome_msg, reply_markup=get_client_kb())
         
     except Exception as e:
         logger.error(f"Ошибка в start команде: {e}")
         await msg.answer("❌ Произошла ошибка при запуске бота.")
-
-@dp.message(F.text == "🎟 Мой QR")
-async def my_qr(msg: types.Message):
-    try:
-        user_id = msg.from_user.id
-        name = msg.from_user.full_name
-        
-        qr_data = str(user_id)
-        qr_img = qrcode.make(qr_data)
-        buf = io.BytesIO()
-        qr_img.save(buf, format="PNG")
-        buf.seek(0)
-        photo = BufferedInputFile(buf.read(), filename="qr.png")
-        
-        await msg.answer_photo(photo=photo, caption=f"🎟 Ваш QR-код\n👤 {name}")
-    except Exception as e:
-        await msg.answer("❌ Ошибка при создании QR-кода.")
 
 @dp.message(F.text == "📊 Мои посещения")
 async def my_status(msg: types.Message):
@@ -196,11 +174,17 @@ async def my_status(msg: types.Message):
 @dp.message(F.text == "🆔 Мой ID")
 async def get_my_id(msg: types.Message):
     user_id = msg.from_user.id
-    await msg.answer(f"🆔 Ваш User ID: `{user_id}`", parse_mode="Markdown")
+    await msg.answer(f"🆔 Ваш User ID: `{user_id}`\n\nСообщите этот ID администратору для отметки посещений.", parse_mode="Markdown")
 
 @dp.message(F.text == "ℹ️ Помощь")
 async def help_cmd(msg: types.Message):
-    help_text = "ℹ️ Помощь по боту:\n\n🎟 Мой QR - получить QR-код\n📊 Мои посещения - статус абонемента\n🆔 Мой ID - ваш идентификатор"
+    help_text = """ℹ️ Помощь по боту:
+
+📊 Мои посещения - статус абонемента
+🆔 Мой ID - ваш идентификатор для администратора
+ℹ️ Помощь - это сообщение
+
+Для отметки посещения сообщите свой ID администратору."""
     await msg.answer(help_text)
 
 # --- Админ команды ---
@@ -221,7 +205,7 @@ async def list_clients(msg: types.Message):
         text = "📋 Список клиентов:\n\n"
         for user_id, name, visits_left, end_date in rows:
             status = "✅" if visits_left > 0 else "❌"
-            text += f"{status} {name} - {visits_left} посещ., до {end_date}\n"
+            text += f"{status} {name} (ID: {user_id})\n   🎟 {visits_left} посещ., до {end_date}\n\n"
         
         await msg.answer(text)
             
@@ -241,7 +225,7 @@ async def show_stats(msg: types.Message):
             async with db.execute("SELECT COUNT(*) FROM clients WHERE visits_left > 0 AND end_date >= date('now')") as cursor:
                 active = (await cursor.fetchone())[0]
         
-        stats_text = f"📊 Статистика зала\n\n👥 Всего клиентов: {total}\n✅ Активных: {active}\n📅 Дата: {datetime.now().strftime('%d.%m.%Y')}"
+        stats_text = f"📊 Статистика зала\n\n👥 Всего клиентов: {total}\n✅ Активных: {active}\n📅 Дата: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
         await msg.answer(stats_text)
         
     except Exception as e:
@@ -261,9 +245,8 @@ async def manual_visit_start(msg: types.Message, state: FSMContext):
         return
     
     await msg.answer("Введите User ID клиента для отметки посещения:", reply_markup=get_cancel_kb())
-    # Сохраняем состояние для ручного ввода ID
-    await state.set_state(AddClientStates.waiting_for_user_id)
     await state.update_data(action="mark_visit")
+    await state.set_state(AddClientStates.waiting_for_user_id)
 
 @dp.message(F.text == "❌ Отмена")
 async def cancel_handler(msg: types.Message, state: FSMContext):
@@ -278,4 +261,98 @@ async def cancel_handler(msg: types.Message, state: FSMContext):
     await msg.answer("❌ Действие отменено", reply_markup=get_admin_kb())
 
 @dp.message(AddClientStates.waiting_for_user_id)
-async def process_user_id(msg: types.Message
+async def process_user_id(msg: types.Message, state: FSMContext):
+    if msg.from_user.id != ADMIN_ID:
+        return
+    
+    if msg.text == "❌ Отмена":
+        await state.clear()
+        await msg.answer("❌ Действие отменено", reply_markup=get_admin_kb())
+        return
+    
+    user_id_text = msg.text.strip()
+    
+    if not re.match(r'^\d+$', user_id_text):
+        await msg.answer("❌ User ID должен содержать только цифры. Попробуйте еще раз:", reply_markup=get_cancel_kb())
+        return
+    
+    user_id = int(user_id_text)
+    
+    data = await state.get_data()
+    action = data.get('action')
+    
+    if action == "mark_visit":
+        await mark_visit(user_id, msg)
+        await state.clear()
+        return
+    
+    async with aiosqlite.connect("visits.db") as db:
+        async with db.execute("SELECT name FROM clients WHERE user_id=?", (user_id,)) as cursor:
+            existing_client = await cursor.fetchone()
+    
+    if existing_client:
+        await msg.answer(f"❌ Клиент с ID {user_id} уже существует: {existing_client[0]}", reply_markup=get_admin_kb())
+        await state.clear()
+        return
+    
+    await state.update_data(user_id=user_id)
+    await msg.answer("✅ User ID принят. Теперь отправьте имя клиента:", reply_markup=get_cancel_kb())
+    await state.set_state(AddClientStates.waiting_for_name)
+
+@dp.message(AddClientStates.waiting_for_name)
+async def process_client_name(msg: types.Message, state: FSMContext):
+    if msg.from_user.id != ADMIN_ID:
+        return
+    
+    if msg.text == "❌ Отмена":
+        await state.clear()
+        await msg.answer("❌ Добавление клиента отменено", reply_markup=get_admin_kb())
+        return
+    
+    name = msg.text.strip()
+    
+    if len(name) < 2:
+        await msg.answer("❌ Имя слишком короткое. Введите корректное имя:", reply_markup=get_cancel_kb())
+        return
+    
+    data = await state.get_data()
+    user_id = data['user_id']
+    
+    try:
+        async with aiosqlite.connect("visits.db") as db:
+            await db.execute(
+                "INSERT INTO clients (user_id, name, visits_left, end_date, registration_date) VALUES (?, ?, ?, ?, ?)",
+                (user_id, name, 12, (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d"), datetime.now().strftime("%Y-%m-%d"))
+            )
+            await db.commit()
+        
+        success_msg = f"✅ Клиент успешно добавлен!\n\n👤 Имя: {name}\n🆔 User ID: {user_id}\n🎟 Посещений: 12\n📅 Абонемент до: {(datetime.now() + timedelta(days=30)).strftime('%d.%m.%Y')}"
+        await msg.answer(success_msg, reply_markup=get_admin_kb())
+        
+        try:
+            await bot.send_message(
+                user_id,
+                f"🎉 Добро пожаловать! Вы были добавлены в систему.\n👤 Ваше имя: {name}\n🎟 Посещений: 12\n📅 Абонемент до: {(datetime.now() + timedelta(days=30)).strftime('%d.%m.%Y')}\n\nВаш ID: {user_id}",
+                reply_markup=get_client_kb()
+            )
+        except:
+            await msg.answer("⚠️ Клиент добавлен, но не удалось отправить сообщение.")
+            
+    except Exception as e:
+        await msg.answer("❌ Ошибка при добавлении клиента.")
+    
+    await state.clear()
+
+@dp.message(Command("get_id"))
+async def get_id_cmd(msg: types.Message):
+    user_id = msg.from_user.id
+    await msg.answer(f"🆔 Ваш User ID: `{user_id}`", parse_mode="Markdown")
+
+# --- Запуск бота ---
+async def main():
+    logger.info("🚀 Запуск бота...")
+    await init_db()
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
