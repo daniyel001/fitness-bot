@@ -352,7 +352,7 @@ async def get_id_cmd(msg: types.Message):
 async def main():
     logger.info("🚀 Запуск бота...")
     await init_db()
-    await dp.start_polling(bot)
+    await dp.start_polling(bot, skip_updates=True)
 
 if __name__ == "__main__":
     asyncio.run(main())
